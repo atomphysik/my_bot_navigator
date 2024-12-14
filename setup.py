@@ -20,7 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'local_costmap_subscriber = my_bot_navigator.local_costmap_subscriber:main'
+            'costmap_obstacle_avoidance.py = my_bot_navigator.costmap_obstacle_avoidance:main'
         ],
     },
 )

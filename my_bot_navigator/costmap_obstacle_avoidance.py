@@ -35,20 +35,33 @@ class local_subscriber(Node):
         self.tf2_buffer = tf2_ros.Buffer()
         self.tf2_listener = tf2_ros.TransformListener(self.tf2_buffer, self)
         self.cmdvel = Twist()
+        self.prev_cmdvel = Twist()
         self.forced = False
+        self.timer = None
 
     def sub_costmap_callback(self, msg):
+        """
+        Costmap gradient and its dot product with robot velocity is calculated.
+        If the value of dot product is positive, robot comes into the forced mode
+        until the direction is adjusted.
+        After adjustment, it follows the previous velocity again.
+        """
+        # Local costmap is being saved.
         costmap = np.array(msg.data)
         self.costmap = costmap.reshape(msg.metadata.size_x, msg.metadata.size_y).T
+        # Calculated the gradient of costmap.
         self.costmap_grad_x, self.costmap_grad_y = np.gradient(self.costmap)
+        # Transform object for coordinate transformation of gradient vector.  
         transform = self.tf2_buffer.lookup_transform(
             'map',
             'base_link',
             rclpy.time.Time(),
             rclpy.duration.Duration(seconds=0.2)
         )
+        # The position of robot in the local costmap grid.
         x_local = int((transform.transform.translation.x - msg.metadata.origin.position.x)*20)
         y_local = int((transform.transform.translation.y - msg.metadata.origin.position.y)*20)
+        # Calculate the gradient vector of costmap at the position of robot.
         x = self.costmap_grad_x[x_local, y_local]
         y = self.costmap_grad_y[x_local, y_local]
         quaternion = transform.transform.rotation
@@ -56,8 +69,10 @@ class local_subscriber(Node):
         self.robot_grad_x = x * np.cos(yaw) + y * np.sin(yaw)
         self.robot_grad_y = -x * np.sin(yaw) + y * np.cos(yaw)
         self.robot_grad = np.array([self.robot_grad_x, self.robot_grad_y])
-        data = im.fromarray(self.costmap, 'L')
-        data.save('test.png')
+
+        # data = im.fromarray(self.costmap, 'L')
+        # data.save('test.png')
+        
         # np.set_printoptions(threshold=sys.maxsize)
         # self.get_logger().info(str(costmap))
         
@@ -68,9 +83,13 @@ class local_subscriber(Node):
         # z = self.cmdvel.linear.z  # Assuming no height change
 
         # twist_trans = np.array([x, y, z])
+        
+        # Get the velocity vector of robot.
         twist_trans = np.array([self.cmdvel.linear.x, self.cmdvel.linear.y, self.cmdvel.linear.z])
         twist_trans_2d = twist_trans[0:2]
-        self.get_logger().info(str(twist_trans_2d) + ' ' + str(self.robot_grad) + ' ' + str(x_local) + str(y_local) + ' ' + str(self.forced))
+        self.get_logger().info(str(twist_trans_2d) + ' ' + str(self.robot_grad) + ' ' + str(self.robot_grad_x ** 2) + str(self.forced))
+        # Determine if gradient vector and velocity vector is positive or negative.
+        # If it is positive, we adjust the direction by rotating the robot in the most efficient direction.
         if np.dot(twist_trans_2d, self.robot_grad) > 0:
             
             vel = Twist()
@@ -83,17 +102,18 @@ class local_subscriber(Node):
                 vel.angular.z = 0.5
             else:
                 vel.angular.z = -0.5
-            self.forced = True
+            self.prev_cmdvel = self.cmdvel
             self.pub_cmdvel.publish(vel)
-        if self.forced == True and self.robot_grad_x ** 2 < 10  :
-            vel = Twist()
-            vel.linear.x = 0.0
-            vel.linear.y = 0.0
-            vel.linear.z = 0.0
-            vel.angular.x = 0.0
-            vel.angular.y = 0.0
-            vel.angular.z = 0.0
-            self.pub_cmdvel.publish(vel)
+            self.timer = self.create_timer(0.2, self.get_forced)
+        elif self.forced == True and self.robot_grad_x ** 2 < 80  :
+            # vel = Twist()
+            # vel.linear.x = 0.0
+            # vel.linear.y = 0.0
+            # vel.linear.z = 0.0
+            # vel.angular.x = 0.0
+            # vel.angular.y = 0.0
+            # vel.angular.z = 0.0
+            self.pub_cmdvel.publish(self.prev_cmdvel)
             # print('f')
             # self.pub_cmdvel.publish(self.cmdvel)
             self.forced = False
@@ -101,9 +121,19 @@ class local_subscriber(Node):
 
     
     def sub_cmdvel_callback(self, msg):
+        """
+        Save cmd_vel to know the current status of robot.
+        """
         self.cmdvel = msg
         if self.forced == True:
             self.forced = False
+
+    def get_forced(self):
+        """
+        Change robot mode to forced.
+        """
+        self.forced = True
+        self.timer.cancel()
 
     def euler_from_quaternion(self, quaternion):
         """
