@@ -14,7 +14,7 @@ So before running, you should activate the slam_toolbox and navigation2.
 If you are using my_bot package, you can simply activate them in the terminal
 with the following commands.
 
-'''Bash
+'''console
 
 ros2 launch my_bot launch_slam.launch .py
 ros2 launch nav2_bringup navigation_launch.py
@@ -25,13 +25,13 @@ ros2 launch nav2_bringup navigation_launch.py
 ### How to run
 At first, you should build and source the setup.bash file of the workspace 
 which contains this package.
-'''Bash
+'''console
 cd ~/${your_workspace_name}
 colcon build --symlink-install
 source ./install/setup.bash
 '''
 Then you can simply run this obstacle avoidance node with this command:
-'''Bash
+'''console
 ros2 run my_bot_navigator costmap_obstacle_avoidance
 '''
 
