@@ -28,16 +28,23 @@ class local_subscriber(Node):
         )
         self.pub_cmdvel = self.create_publisher(
             Twist,
-            'cmd_vel',
+            '/cmd_vel',
             10
         )
+
+        # costmap matrix saver
         self.costmap = None
+        # buffer and listener for tf
         self.tf2_buffer = tf2_ros.Buffer()
         self.tf2_listener = tf2_ros.TransformListener(self.tf2_buffer, self)
+        # current velocity(lastest cmdvel msg) saver
         self.cmdvel = Twist()
+        # velocity saver for publishing previous velocity after forced mode
         self.prev_cmdvel = Twist()
+        # determine whether the robot is in forced mode or not
         self.forced = False
-        self.timer = None
+        # timer
+        self.timer = None  
 
     def sub_costmap_callback(self, msg):
         """
@@ -49,18 +56,22 @@ class local_subscriber(Node):
         # Local costmap is being saved.
         costmap = np.array(msg.data)
         self.costmap = costmap.reshape(msg.metadata.size_x, msg.metadata.size_y).T
+    
         # Calculated the gradient of costmap.
         self.costmap_grad_x, self.costmap_grad_y = np.gradient(self.costmap)
+
         # Transform object for coordinate transformation of gradient vector.  
         transform = self.tf2_buffer.lookup_transform(
-            'map',
+            'odom',
             'base_link',
             rclpy.time.Time(),
             rclpy.duration.Duration(seconds=0.2)
         )
+
         # The position of robot in the local costmap grid.
         x_local = int((transform.transform.translation.x - msg.metadata.origin.position.x)*20)
         y_local = int((transform.transform.translation.y - msg.metadata.origin.position.y)*20)
+
         # Calculate the gradient vector of costmap at the position of robot.
         x = self.costmap_grad_x[x_local, y_local]
         y = self.costmap_grad_y[x_local, y_local]
@@ -70,24 +81,28 @@ class local_subscriber(Node):
         self.robot_grad_y = -x * np.sin(yaw) + y * np.cos(yaw)
         self.robot_grad = np.array([self.robot_grad_x, self.robot_grad_y])
 
-        # data = im.fromarray(self.costmap, 'L')
-        # data.save('test.png')
+        # code for development
+        """
+        data = im.fromarray(self.costmap, 'L')
+        data.save('test.png')
         
-        # np.set_printoptions(threshold=sys.maxsize)
-        # self.get_logger().info(str(costmap))
+        np.set_printoptions(threshold=sys.maxsize)
+        self.get_logger().info(str(costmap))
         
-        # quaternion = transform.transform.rotation
-        # roll, pitch, yaw = self.euler_from_quaternion(quaternion)
-        # x = self.cmdvel.linear.x * np.cos(yaw) - self.cmdvel.linear.y * np.sin(yaw)
-        # y = self.cmdvel.linear.x * np.sin(yaw) + self.cmdvel.linear.y * np.cos(yaw)
-        # z = self.cmdvel.linear.z  # Assuming no height change
+        quaternion = transform.transform.rotation
+        roll, pitch, yaw = self.euler_from_quaternion(quaternion)
+        x = self.cmdvel.linear.x * np.cos(yaw) - self.cmdvel.linear.y * np.sin(yaw)
+        y = self.cmdvel.linear.x * np.sin(yaw) + self.cmdvel.linear.y * np.cos(yaw)
+        z = self.cmdvel.linear.z  # Assuming no height change
 
-        # twist_trans = np.array([x, y, z])
+        twist_trans = np.array([x, y, z])
+        """
         
         # Get the velocity vector of robot.
         twist_trans = np.array([self.cmdvel.linear.x, self.cmdvel.linear.y, self.cmdvel.linear.z])
         twist_trans_2d = twist_trans[0:2]
         self.get_logger().info(str(twist_trans_2d) + ' ' + str(self.robot_grad) + ' ' + str(self.robot_grad_x ** 2) + str(self.forced))
+
         # Determine if gradient vector and velocity vector is positive or negative.
         # If it is positive, we adjust the direction by rotating the robot in the most efficient direction.
         if np.dot(twist_trans_2d, self.robot_grad) > 0:
@@ -106,16 +121,8 @@ class local_subscriber(Node):
             self.pub_cmdvel.publish(vel)
             self.timer = self.create_timer(0.2, self.get_forced)
         elif self.forced == True and self.robot_grad_x ** 2 < 80  :
-            # vel = Twist()
-            # vel.linear.x = 0.0
-            # vel.linear.y = 0.0
-            # vel.linear.z = 0.0
-            # vel.angular.x = 0.0
-            # vel.angular.y = 0.0
-            # vel.angular.z = 0.0
+            
             self.pub_cmdvel.publish(self.prev_cmdvel)
-            # print('f')
-            # self.pub_cmdvel.publish(self.cmdvel)
             self.forced = False
             
 
